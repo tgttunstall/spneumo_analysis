@@ -3,18 +3,18 @@
 #Submit this script with: sbatch thefilename
 #For more details about each parameter, please check SLURM sbatch documentation https://slurm.schedmd.com/sbatch.html
 
-#SBATCH --time=72:00:00   # walltime
+#SBATCH --time=24:00:00   # walltime
 #SBATCH --ntasks=1   # number of tasks
 #SBATCH --cpus-per-task=8  # number of CPUs Per Task i.e if your code is multi-threaded
 #SBATCH --nodes=1   # number of nodes
 #SBATCH --mem=64G   # memory per node
 #SBATCH -J "UP_Unifire_result_combine"   # job name
 #SBATCH -o "console_unifire/UP_UFire_res_com_%A_%a.out"   # job output file
-#SBATCH --array=1-26749%1000  #ATB:1-59851%1000
-#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --array=1-26749%1000  #ATB:1-59851%1000 # up check for 1,2721%1
 
 #======================================================
 # LOAD MODULES, INSERT CODE, AND RUN YOUR PROGRAMS HERE
+     #SBATCH --mail-type=BEGIN,END,FAIL #ARRAY_TASKS (not to run!)
 #======================================================
 RUN_SCRIPT=/nfs/research/martin/uniprot/research/spneumo_analysis/process_unifire_predictions.py
 
@@ -37,4 +37,4 @@ echo No of lines: $(wc -l ${INFILE})
 printf "Input file:${INFILE}\nTASK-ID: ${SLURM_ARRAY_TASK_ID}\nFASTA_FILE: ${FASTA_FILE}\nLINE_NUMBER: ${LINE_NUMBER}\n"
 
 #echo time process_unifire_predictions.py unifire_paths.txt
-time ${RUN_SCRIPT} ${FASTA_FILE} --force
+time ${RUN_SCRIPT} --input ${FASTA_FILE} --force --log WARNING --logfile ${BASEDIR}/${STR_ADD}_missing_uf.log

@@ -1,82 +1,95 @@
 #!/usr/bin/env python
 
-import pandas as pd
+import argparse
+import logging
 from pathlib import Path
 import sys
-import argparse
+import pandas as pd
 
-def process_proteome_dir(proteome_path: Path, force: bool, missing_files_log):
+PREDICTION_FILES = {
+    'arba': 'predictions_arba.out',
+    'unirule': 'predictions_unirule.out',
+    'pirsr': 'predictions_unirule-pirsr.out',
+}
+
+def setup_logging(loglevel, logfile):
+    logger = logging.getLogger("proteome_logger")
+    logger.setLevel(getattr(logging, loglevel))
+    
+    # File handler for missing files
+    fh = logging.FileHandler(logfile) #<-- Use user-specified log file
+    #fh = logging.FileHandler("missing_files_log.txt")
+    #fh.setLevel(logging.WARNING)
+    fh.setLevel(getattr(logging, loglevel))  # <-- Use user-specified log level
+    fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    
+    # Console handler for info/warnings/errors
+    ch = logging.StreamHandler()
+    #ch.setLevel(getattr(logging, loglevel))
+    ch.setLevel(getattr(logging, loglevel))  # <-- Use user-specified log level
+    ch.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    
+    logger.handlers = []  # Clear any existing handlers
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    return logger
+
+def process_proteome_dir(proteome_path: Path, force: bool, logger: logging.Logger):
     """
     Combine prediction files in a given proteome directory into a single output file.
-    Records directories where prediction files are missing, specifying the proteome ID.
-
-    Parameters:
-        proteome_path (Path): Path to the proteome directory.
-        force (bool): If True, overwrite existing output file. If False, exit with a warning if output exists.
-        missing_files_log (list): List to record directories with missing files and their proteome IDs.
-
-    The function looks for the following files in the directory:
-        - predictions_arba.out
-        - predictions_unirule.out
-        - predictions_unirule-pirsr.out
-
-    Each found file is read and combined into a single DataFrame, with an added 'source' column indicating its origin.
-    The combined data is written to 'all_predictions_<proteome_dir>.out' in the same directory.
+    Logs missing files.
     """
-    prediction_files = {
-        'arba': 'predictions_arba.out',
-        'unirule': 'predictions_unirule.out',
-        'pirsr': 'predictions_unirule-pirsr.out',
-    }
-
     dfs = []
     missing_files = []
-    for source, filename in prediction_files.items():
+    for source, filename in PREDICTION_FILES.items():
         file_path = proteome_path / filename
         if file_path.exists():
-            df = pd.read_csv(file_path, sep='\t')
-            df['source'] = source
-            dfs.append(df)
+            try:
+                df = pd.read_csv(file_path, sep='\t')
+                df['source'] = source
+                dfs.append(df)
+            except Exception as e:
+                logger.warning(f"{proteome_path}: Failed to read {filename}: {e}")
         else:
             missing_files.append(filename)
-            print(f"Warning: {file_path} not found, skipping...")
+            logger.warning(f"{proteome_path}: {filename} not found.")
 
     if missing_files:
-        missing_files_log.append(f"{proteome_path.name}: {' '.join(missing_files)}")
+        logger.warning(f"{proteome_path}: Missing files: {' '.join(missing_files)}")
 
     if not dfs:
-        print(f"No prediction files found in {proteome_path}, skipping.")
+        logger.info(f"{proteome_path}: No prediction files found, skipping.")
         return
 
     combined_df = pd.concat(dfs, ignore_index=True)
     combined_df['proteome_id'] = proteome_path.name
 
     output_file = proteome_path / f"all_predictions_{proteome_path.name}.out"
-
-    # Check for existing file and handle force flag
     if output_file.exists() and not force:
-        print(f"Error: {output_file} already exists. Use --force to overwrite.")
-        sys.exit(1)
+        logger.error(f"{output_file} already exists. Use --force to overwrite.")
+        return
     elif output_file.exists() and force:
-        print(f"Warning: Overwriting existing file {output_file}")
+        logger.info(f"Overwriting existing file {output_file}")
 
-    combined_df.to_csv(output_file, sep='\t', index=False)
-    print(f"Written: {output_file}")
+    try:
+        combined_df.to_csv(output_file, sep='\t', index=False)
+        logger.info(f"Written: {output_file}")
+    except Exception as e:
+        logger.error(f"Failed to write {output_file}: {e}")
 
-def process_input_path(input_path: Path, force: bool):
+def process_input(input_path: Path, force: bool, logger: logging.Logger):
     """
-    Process either a single proteome directory or a file listing multiple directory paths.
-    Records missing files in a log.
-
-    Parameters:
-        input_path (Path): Path to a directory or a file containing directory paths (one per line).
-        force (bool): If True, overwrite existing output files. If False, exit with a warning if output exists.
-
-    For a file input, each non-empty line is treated as a directory path to process.
+    Detects input type and processes accordingly:
+    - Single directory with predictions*out files
+    - Directory of subdirectories (each with predictions*out files)
+    - File containing list of directories
     """
-    missing_files_log = []
+    processed = 0
+    skipped = 0
+
     if input_path.is_file():
-        print(f"Processing file list: {input_path}")
+        # Treat as file containing list of directories
+        logger.info(f"Processing list of directories from file: {input_path}")
         with open(input_path) as f:
             for line in f:
                 line = line.strip()
@@ -84,34 +97,66 @@ def process_input_path(input_path: Path, force: bool):
                     continue
                 proteome_dir = Path(line)
                 if proteome_dir.is_dir():
-                    process_proteome_dir(proteome_dir, force, missing_files_log)
+                    process_proteome_dir(proteome_dir, force, logger)
+                    processed += 1
                 else:
-                    print(f"Warning: {proteome_dir} is not a valid directory, skipping...")
+                    logger.warning(f"{proteome_dir} is not a valid directory, skipping.")
+                    skipped += 1
     elif input_path.is_dir():
-        process_proteome_dir(input_path, force, missing_files_log)
+        # Check for predictions*out files directly in this directory
+        has_predictions = any((input_path / fname).exists() for fname in PREDICTION_FILES.values())
+        if has_predictions:
+            logger.info(f"Processing single proteome directory: {input_path}")
+            process_proteome_dir(input_path, force, logger)
+            processed += 1
+        else:
+            # Check for subdirectories
+            subdirs = [d for d in input_path.iterdir() if d.is_dir()]
+            if subdirs:
+                logger.info(f"Processing {len(subdirs)} subdirectories in {input_path}")
+                for subdir in subdirs:
+                    process_proteome_dir(subdir, force, logger)
+                    processed += 1
+            else:
+                logger.error(f"No prediction files or subdirectories found in {input_path}. Nothing to do.")
+                skipped += 1
     else:
-        print(f"Error: {input_path} is neither a valid file nor directory.")
+        logger.error(f"Input {input_path} is neither a file nor a directory.")
         sys.exit(1)
 
-    # Write out missing files log
-    if missing_files_log:
-        with open('missing_files_log.txt', 'w') as f:
-            for log_entry in missing_files_log:
-                f.write(f"{log_entry}\n")
-        print("Missing files log written to missing_files_log.txt")
+    logger.info(f"Processing complete. {processed} processed, {skipped} skipped.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Combine prediction files in proteome directories into a single output file, with optional overwrite and logging of missing files.'
+        description="Combine prediction files in proteome directories into a single output file. "
+                    "Supports a single directory, a directory of subdirectories, or a file with directory paths."
     )
-    parser.add_argument('input', help='Proteome directory path or file containing multiple paths')
-    parser.add_argument('--force', action='store_true', help='Force overwrite of existing output files')
+    parser.add_argument('--input', required=True, help='Path to a proteome directory, a directory of subdirectories, or a file containing directory paths.')
+    parser.add_argument('--force', action='store_true', help='Force overwrite of existing output files.')
+    parser.add_argument('--log', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], help='Set logging level (default: INFO)')
+    parser.add_argument('--logfile', default='missing_files_log.txt', help='Filename for logging output (default: missing_files_log.txt)')
+
     args = parser.parse_args()
-
+    
     input_path = Path(args.input)
-
+    
     if not input_path.exists():
         print(f"Error: {input_path} does not exist.")
         sys.exit(1)
 
-    process_input_path(input_path, args.force)
+    logger = setup_logging(args.log, args.logfile)
+    process_input(input_path, args.force, logger)
+
+# Usage
+# Default logging (INFO)
+#python script.py --input /path/to/proteome_dir
+
+# More verbose logging
+#python script.py --input /path/to/proteome_dir --log DEBUG
+
+# Only warnings and errors
+#python script.py --input /path/to/proteome_dir --log WARNING
+
+# Force overwrite
+#python script.py --input /path/to/proteome_dir --force
+
