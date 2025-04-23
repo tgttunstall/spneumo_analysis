@@ -5,13 +5,15 @@ from pathlib import Path
 import sys
 import argparse
 
-def process_proteome_dir(proteome_path: Path, force: bool):
+def process_proteome_dir(proteome_path: Path, force: bool, missing_files_log):
     """
     Combine prediction files in a given proteome directory into a single output file.
+    Records directories where prediction files are missing, specifying the proteome ID.
 
     Parameters:
         proteome_path (Path): Path to the proteome directory.
         force (bool): If True, overwrite existing output file. If False, exit with a warning if output exists.
+        missing_files_log (list): List to record directories with missing files and their proteome IDs.
 
     The function looks for the following files in the directory:
         - predictions_arba.out
@@ -28,6 +30,7 @@ def process_proteome_dir(proteome_path: Path, force: bool):
     }
 
     dfs = []
+    missing_files = []
     for source, filename in prediction_files.items():
         file_path = proteome_path / filename
         if file_path.exists():
@@ -35,7 +38,11 @@ def process_proteome_dir(proteome_path: Path, force: bool):
             df['source'] = source
             dfs.append(df)
         else:
+            missing_files.append(filename)
             print(f"Warning: {file_path} not found, skipping...")
+
+    if missing_files:
+        missing_files_log.append(f"{proteome_path.name}: {' '.join(missing_files)}")
 
     if not dfs:
         print(f"No prediction files found in {proteome_path}, skipping.")
@@ -59,6 +66,7 @@ def process_proteome_dir(proteome_path: Path, force: bool):
 def process_input_path(input_path: Path, force: bool):
     """
     Process either a single proteome directory or a file listing multiple directory paths.
+    Records missing files in a log.
 
     Parameters:
         input_path (Path): Path to a directory or a file containing directory paths (one per line).
@@ -66,6 +74,7 @@ def process_input_path(input_path: Path, force: bool):
 
     For a file input, each non-empty line is treated as a directory path to process.
     """
+    missing_files_log = []
     if input_path.is_file():
         print(f"Processing file list: {input_path}")
         with open(input_path) as f:
@@ -75,35 +84,28 @@ def process_input_path(input_path: Path, force: bool):
                     continue
                 proteome_dir = Path(line)
                 if proteome_dir.is_dir():
-                    process_proteome_dir(proteome_dir, force)
+                    process_proteome_dir(proteome_dir, force, missing_files_log)
                 else:
                     print(f"Warning: {proteome_dir} is not a valid directory, skipping...")
     elif input_path.is_dir():
-        process_proteome_dir(input_path, force)
+        process_proteome_dir(input_path, force, missing_files_log)
     else:
         print(f"Error: {input_path} is neither a valid file nor directory.")
         sys.exit(1)
 
+    # Write out missing files log
+    if missing_files_log:
+        with open('missing_files_log.txt', 'w') as f:
+            for log_entry in missing_files_log:
+                f.write(f"{log_entry}\n")
+        print("Missing files log written to missing_files_log.txt")
+
 if __name__ == "__main__":
-    """
-    Script entry point.
-
-    Usage:
-        python process_proteome_dir.py <proteome_dir_path OR file_paths.txt> [--force]
-
-    Arguments:
-        proteome_dir_path: Path to a single proteome directory.
-        file_paths.txt: File containing multiple directory paths (one per line).
-
-    Options:
-        --force: Overwrite existing output files if they exist.
-    """
     parser = argparse.ArgumentParser(
-        description='Combine prediction files in proteome directories into a single output file, with optional overwrite.'
+        description='Combine prediction files in proteome directories into a single output file, with optional overwrite and logging of missing files.'
     )
     parser.add_argument('input', help='Proteome directory path or file containing multiple paths')
-    parser.add_argument('--force', action='store_true',
-                      help='Force overwrite of existing output files')
+    parser.add_argument('--force', action='store_true', help='Force overwrite of existing output files')
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -113,15 +115,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     process_input_path(input_path, args.force)
-
-
-# Usage:
-# Safe mode (no overwrite)
-#process_unifire_predictions.py /path/to/proteome_dir
-
-# Force overwrite
-#process_unifire_predictions.py /path/to/proteome_dir --force
-
-# Process multiple directories with force
-#process_unifire_predictions.py file_list.txt --force
-
