@@ -11,10 +11,10 @@
 #SBATCH -J "BUSCO_ATB"   # job name
 #SBATCH -o "console_busco/BUSCO_ATB_%A_%a.out"   # job output file
 #SBATCH --array=1-59851%1000
-#SBATCH --mail-type=BEGIN,END,FAIL,ARRAY_TASKS
 
 #======================================================
 # LOAD MODULES, INSERT CODE, AND RUN YOUR PROGRAMS HERE
+#    SBATCH --mail-type=BEGIN,END,FAIL,ARRAY_TASKS
 #======================================================
 #source /hps/software/users/martin/uniprot/src/anaconda3/bin/activate busco5
 
@@ -24,6 +24,7 @@ INFILE=${IN_DIR}/atb_proteome_paths_TT.txt
 #FASTA_FILE=$(sed -n ${SLURM_ARRAY_TASK_ID}p ${INFILE}) # used it when --array=1-59850%1000
 #echo "Printing from ${INFILE}, TASK-ID: ${SLURM_ARRAY_TASK_ID}, FASTA_FILE: ${FASTA_FILE}"
 
+#OFFSET=0
 OFFSET=59850
 LINE_NUMBER=$((${SLURM_ARRAY_TASK_ID} + ${OFFSET}))
 FASTA_FILE=$(sed -n ${LINE_NUMBER}p ${INFILE})
