@@ -23,7 +23,7 @@ def group_consecutive(nums):
 def main():
     parser = argparse.ArgumentParser(description="Group consecutive numbers into ranges.")
     parser.add_argument("--input", "-i", required=True, help="Path to input file containing numbers (one per line)")
-    parser.add_argument("--output", "-o", required=True, help="Path to output file to write grouped ranges")
+    parser.add_argument("--output", "-o", required=False, help="Path to output file to write grouped ranges (optional). If not provided, prints to screen")
 
     args = parser.parse_args()
 
@@ -33,8 +33,18 @@ def main():
 
     # Group numbers and write to output file
     grouped = group_consecutive(nums)
-    with open(args.output, "w") as outfile:
-        outfile.write(",".join(grouped))
+    output_str = ",".join(grouped)
+
+    if args.output:
+        with open(args.output, "w") as outfile:
+            outfile.write(output_str)
+        print(f"Grouped ranges written to {args.output}")
+    else:
+        # Print to screen with standout formatting
+        print("\n" + "="*40)
+        print("Grouped Ranges:")
+        print(output_str)
+        print("="*40 + "\n")
 
 if __name__ == "__main__":
     main()
